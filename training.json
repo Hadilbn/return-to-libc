@@ -1,0 +1,277 @@
+{
+  "title": "TP noté — Return-to-libc Attack",
+  "description": "TP d'évaluation individuel sur l'attaque Return-to-libc (contournement de la protection de pile non-exécutable), inspiré du SEED Labs Return-to-libc Attack Lab.",
+  "prerequisites": [
+    "Notions de base : pile d'exécution, dépassement de tampon, utilisation de gdb et de Python."
+  ],
+  "outcomes": [
+    "Comprendre et mettre en oeuvre une attaque Return-to-libc.",
+    "Savoir lire une pile d'exécution et calculer des décalages mémoire.",
+    "Comprendre les limites d'une protection de pile non-exécutable et les contre-mesures associées (ASLR, StackGuard, dash -p)."
+  ],
+  "state": "UNRELEASED",
+  "show_stepper_bar": true,
+  "levels": [
+    {
+      "title": "Introduction",
+      "level_type": "INFO_LEVEL",
+      "order": 0,
+      "estimated_duration": 0,
+      "minimal_possible_solve_time": null,
+      "content": "# TP noté : Return-to-libc\n\n**Barème : le TP est noté sur 20 points.**\n\n- Chaque tâche a un nombre de points maximum indiqué dans son énoncé.\n- Chaque indice (hint) que vous révélez vous coûte **-0.5 point** sur la tâche concernée, qu'il vous serve ou non.\n- Les tâches se débloquent **une par une** : vous devez valider la tâche courante (répondre correctement) pour passer à la suivante. Vous ne pouvez pas revenir en arrière une fois une tâche validée.\n- La Tâche 5 est optionnelle (ROP) et rapporte des points bonus au-delà du 20/20.\n\n## Objectif pédagogique\n\nExploiter une vulnérabilité de dépassement de tampon (buffer overflow) sur un binaire Set-UID root, en contournant la protection de pile non-exécutable grâce à une attaque Return-to-libc (sans shellcode).\n\n## Environnement\n\nUne seule machine `pwn` vous est fournie : elle contient à la fois le binaire vulnérable (`~/lab/retlib`, appartenant à root, bit Set-UID activé) et vos outils d'attaque (gcc 32 bits, gdb+peda, python3). L'ASLR est désactivée et la protection StackGuard est désactivée à la compilation : seule la protection « pile non-exécutable » reste active, c'est elle que vous allez contourner.\n\nCe TP est inspiré du SEED Labs *Return-to-libc Attack Lab* (W. Du, CC BY-NC-SA 4.0)."
+    },
+    {
+      "title": "Accès au sandbox",
+      "level_type": "ACCESS_LEVEL",
+      "order": 1,
+      "estimated_duration": 0,
+      "minimal_possible_solve_time": null,
+      "passkey": "start",
+      "cloud_content": "Connectez-vous à la machine **pwn** (clic droit sur `pwn` dans la topologie > `Open GUI`, ou en SSH avec l'utilisateur `student` / mot de passe `Password123`).\n\nVotre répertoire de travail est `~/lab`. Il contient :\n- `retlib.c` / `retlib` : le programme vulnérable, déjà compilé et Set-UID root\n- `prtenv.c` / `prtenv` : utilitaire pour la tâche 2\n- `exploit_task3_skeleton.py`, `exploit_task4_skeleton.py` : squelettes Python à compléter\n- `gdb_command.txt` : exemple de script gdb en mode batch\n\nUne fois connecté, validez avec **`start`**.",
+      "local_content": "Ce scénario n'a pas été testé en sandbox locale."
+    },
+    {
+      "title": "Tâche 1 — Trouver les adresses de system() et exit()",
+      "level_type": "TRAINING_LEVEL",
+      "order": 2,
+      "estimated_duration": 15,
+      "minimal_possible_solve_time": null,
+      "answer": "p system",
+      "answer_variable_name": null,
+      "content": "Comme l'ASLR est désactivée, la libc est chargée à la même adresse à chaque exécution de `retlib`. Utilisez **gdb** pour trouver les adresses de `system()` et `exit()` (vous en aurez besoin à la Tâche 3).\n\n```\n$ cd ~/lab\n$ touch badfile\n$ gdb -q retlib\ngdb-peda$ break main\ngdb-peda$ run\ngdb-peda$ p system\ngdb-peda$ p exit\ngdb-peda$ quit\n```\n\nNotez les deux adresses obtenues (vous les réutiliserez à la Tâche 3) et répondez : **quelle commande gdb affiche l'adresse d'une fonction de la libc comme `system` ?** (répondez exactement avec la commande, ex. `p system`).",
+      "solution": "`p system` (ou `print system`) affiche l'adresse de `system()` dans la libc chargée en mémoire ; `p exit` fait de même pour `exit()`. Il faut d'abord placer un breakpoint sur `main` et faire `run` pour que la libc soit chargée.",
+      "solution_penalized": true,
+      "hints": [
+        {
+          "title": "Quel outil utiliser ?",
+          "content": "Utilisez le débogueur `gdb` (avec PEDA déjà installé) sur le binaire `retlib`.",
+          "hint_penalty": 0.5,
+          "order": 0
+        },
+        {
+          "title": "Pourquoi faut-il faire `run` avant ?",
+          "content": "La libc n'est chargée en mémoire qu'à l'exécution du programme ; sans `run`, gdb ne connaît pas encore son adresse.",
+          "hint_penalty": 0.5,
+          "order": 1
+        },
+        {
+          "title": "Syntaxe exacte",
+          "content": "Dans gdb : `break main`, puis `run`, puis `p system` et `p exit`.",
+          "hint_penalty": 0.5,
+          "order": 2
+        }
+      ],
+      "incorrect_answer_limit": 10,
+      "attachments": [],
+      "max_score": 3,
+      "variant_answers": false,
+      "reference_solution": [
+        {
+          "state_name": "gdb_system_addr",
+          "prereq_state": [],
+          "cmd": "p system",
+          "cmd_type": "bash-command",
+          "cmd_regex": "p(rint)?\\s+system",
+          "optional": false
+        },
+        {
+          "state_name": "gdb_exit_addr",
+          "prereq_state": [],
+          "cmd": "p exit",
+          "cmd_type": "bash-command",
+          "cmd_regex": "p(rint)?\\s+exit",
+          "optional": false
+        }
+      ],
+      "mitre_techniques": [],
+      "expected_commands": [],
+      "commands_required": false
+    },
+    {
+      "title": "Tâche 2 — Placer la chaîne \"/bin/sh\" en mémoire",
+      "level_type": "TRAINING_LEVEL",
+      "order": 3,
+      "estimated_duration": 10,
+      "minimal_possible_solve_time": null,
+      "answer": "export MYSHELL=/bin/sh",
+      "answer_variable_name": null,
+      "content": "`system()` doit recevoir l'adresse de la chaîne `\"/bin/sh\"`. On va la placer dans une variable d'environnement.\n\n1. Définissez une variable d'environnement `MYSHELL` contenant `/bin/sh`.\n2. Compilez et lancez `./prtenv` (déjà fourni dans `~/lab`) pour obtenir son adresse en mémoire.\n\n**Quelle commande shell permet de définir cette variable d'environnement ?** (répondez exactement, ex. `export VAR=valeur`)",
+      "solution": "`export MYSHELL=/bin/sh` crée la variable d'environnement, héritée par les processus enfants lancés depuis ce shell (dont `retlib` et `prtenv`). `./prtenv` affiche ensuite son adresse avec `getenv(\"MYSHELL\")`.",
+      "solution_penalized": true,
+      "hints": [
+        {
+          "title": "Quelle commande shell ?",
+          "content": "Les variables exportées par le shell deviennent des variables d'environnement des processus enfants : `export`.",
+          "hint_penalty": 0.5,
+          "order": 0
+        },
+        {
+          "title": "Comment lire l'adresse ensuite ?",
+          "content": "Compilez `prtenv.c` (déjà fait par `make`) puis exécutez `./prtenv` **dans le même terminal**.",
+          "hint_penalty": 0.5,
+          "order": 1
+        }
+      ],
+      "incorrect_answer_limit": 10,
+      "attachments": [],
+      "max_score": 3,
+      "variant_answers": false,
+      "reference_solution": [
+        {
+          "state_name": "myshell_exported",
+          "prereq_state": [],
+          "cmd": "export MYSHELL=/bin/sh",
+          "cmd_type": "bash-command",
+          "cmd_regex": "export\\s+MYSHELL=/bin/sh",
+          "optional": false
+        }
+      ],
+      "mitre_techniques": [],
+      "expected_commands": [],
+      "commands_required": false
+    },
+    {
+      "title": "Tâche 3 — Lancer l'attaque et obtenir un shell root",
+      "level_type": "TRAINING_LEVEL",
+      "order": 4,
+      "estimated_duration": 30,
+      "minimal_possible_solve_time": null,
+      "answer": "R2L-TASK3-5f3c9a-SYSTEM-SHELL-OK",
+      "answer_variable_name": null,
+      "content": "Complétez `~/lab/exploit_task3_skeleton.py` : construisez `badfile` pour qu'au retour de `bof()`, le programme saute vers `system()`, qui reçoit l'adresse de `\"/bin/sh\"`, puis vers `exit()`.\n\nIl vous faut déterminer :\n- **X, Y, Z** : les décalages (offsets) dans `badfile` où écrire respectivement l'adresse de `/bin/sh`, l'adresse de `system()` et l'adresse de `exit()` (pensez à la structure de la pile après le dépassement : adresse de retour, puis argument de `system()`...).\n- Les adresses trouvées aux tâches 1 et 2.\n\n```\n$ python3 exploit_task3_skeleton.py\n$ ./retlib\n```\n\nSi l'exploit réussit, vous obtenez un **shell avec les privilèges root**. Dans ce shell, lisez le fichier de preuve :\n\n```\n# cat /root/flag_task3.txt\n```\n\n**Le flag est le contenu de ce fichier.**",
+      "solution": "La pile, après l'écrasement de l'adresse de retour de `bof()`, doit contenir dans l'ordre : adresse de `system()` (= nouvelle adresse de retour), puis une adresse de retour factice pour `system()` (ici l'adresse de `exit()`), puis l'adresse de `\"/bin/sh\"` (= argument de `system()`). Il faut calculer le décalage exact du début de l'ancienne adresse de retour par rapport au début du buffer (buffer + espace alloué + ancien EBP sauvegardé), ce qui dépend de BUF_SIZE et de l'alignement de la pile.",
+      "solution_penalized": true,
+      "hints": [
+        {
+          "title": "Quel est l'ordre sur la pile ?",
+          "content": "Après l'adresse de retour écrasée (= adresse de `system`), il faut une fausse adresse de retour pour `system()` (= adresse de `exit`), puis l'argument de `system()` (= adresse de `/bin/sh`), exactement comme un appel normal de `system(\"/bin/sh\")` vu depuis la pile.",
+          "hint_penalty": 0.5,
+          "order": 0
+        },
+        {
+          "title": "Comment calculer X, Y, Z ?",
+          "content": "Repartez de l'affichage `Frame Pointer value inside bof()` : l'ancienne adresse de retour se trouve 4 octets après l'ancien EBP sauvegardé. Calculez le décalage entre le début de `buffer[]` et cette position.",
+          "hint_penalty": 0.5,
+          "order": 1
+        },
+        {
+          "title": "L'exploit ne fonctionne pas, que vérifier ?",
+          "content": "Vérifiez que vous avez bien réexporté `MYSHELL` dans le terminal où vous lancez `./retlib`, et que les adresses de `system`/`exit` sont celles obtenues dans la même session gdb (elles sont stables tant que l'ASLR reste désactivée).",
+          "hint_penalty": 0.5,
+          "order": 2
+        }
+      ],
+      "incorrect_answer_limit": 20,
+      "attachments": [],
+      "max_score": 6,
+      "variant_answers": false,
+      "reference_solution": [],
+      "mitre_techniques": [],
+      "expected_commands": [],
+      "commands_required": false
+    },
+    {
+      "title": "Tâche 3 bis — Questions de réflexion (rapport)",
+      "level_type": "TRAINING_LEVEL",
+      "order": 5,
+      "estimated_duration": 10,
+      "minimal_possible_solve_time": null,
+      "answer": "oui",
+      "answer_variable_name": null,
+      "content": "Ces deux questions sont à développer **dans votre rapport** (l'enseignant corrige manuellement le détail ; validez ici par `oui` une fois que vous avez rédigé vos réponses dans le rapport pour débloquer la suite) :\n\n1. **Variation 1** : relancez l'attaque sans inclure l'adresse de `exit()` dans `badfile`. Que se passe-t-il ? Expliquez pourquoi.\n2. **Variation 2** : renommez `retlib` en un nom de longueur différente (ex. `newretlib`) et relancez l'attaque **sans modifier** `badfile`. Réussit-elle encore ? Justifiez.\n\nAvez-vous rédigé ces deux réponses dans votre rapport ?",
+      "solution": "1. Sans `exit()`, le programme continue en exécutant du code arbitraire après le retour de `system()` (souvent un crash), car il n'y a pas d'adresse de retour valide prévue. 2. Changer la longueur du nom du binaire modifie la taille de l'environnement (`argv[0]`/nom de programme sur la pile), ce qui décale l'adresse de la variable d'environnement `MYSHELL` : l'exploit, qui pointe vers une adresse fixe, échoue généralement.",
+      "solution_penalized": false,
+      "hints": [],
+      "incorrect_answer_limit": 10,
+      "attachments": [],
+      "max_score": 2,
+      "variant_answers": false,
+      "reference_solution": [],
+      "mitre_techniques": [],
+      "expected_commands": [],
+      "commands_required": false
+    },
+    {
+      "title": "Tâche 4 — Contourner la contre-mesure du shell (dash)",
+      "level_type": "TRAINING_LEVEL",
+      "order": 6,
+      "estimated_duration": 30,
+      "minimal_possible_solve_time": null,
+      "answer": "R2L-TASK4-91be2d-BASHP-ROOT-OK",
+      "answer_variable_name": null,
+      "content": "`/bin/sh` pointe actuellement vers `zsh`. En conditions réelles, il pointe souvent vers `dash`, qui **abandonne les privilèges Set-UID** dès qu'il est lancé dans un tel processus — sauf s'il est invoqué avec `bash -p`.\n\n1. Revenez à la configuration réaliste :\n```\n$ sudo ln -sf /bin/dash /bin/sh\n```\n2. Complétez `~/lab/exploit_task4_skeleton.py` pour que l'exploit retourne cette fois vers **`execv()`**, afin d'exécuter directement `\"/bin/bash\" \"-p\"` (sans passer par `system()`, donc sans perdre les privilèges).\n\nRappel de la signature : `execv(pathname, argv[])`, avec `argv[0] = \"/bin/bash\"`, `argv[1] = \"-p\"`, `argv[2] = NULL`. Le programme affiche l'adresse de son buffer `input[]` dans `main()` : utilisez-la pour construire `argv[]` directement dans votre `badfile`.\n\nUne fois le shell root obtenu :\n```\n# cat /root/flag_task4.txt\n```",
+      "solution": "On construit, dans `badfile`, le tableau `argv[]` (3 pointeurs de 4 octets : `/bin/bash`, `-p`, `NULL`) à un offset connu de `input[]` (affiché par le programme), ainsi que les chaînes `\"/bin/bash\\0\"` et `\"-p\\0\"`. On fait pointer l'adresse de retour écrasée vers `execv()`, avec comme arguments l'adresse de `\"/bin/bash\"` et l'adresse du tableau `argv[]` construit.",
+      "solution_penalized": true,
+      "hints": [
+        {
+          "title": "Pourquoi system() ne suffit plus ?",
+          "content": "`system()` invoque `/bin/sh` sans l'option `-p` : si `/bin/sh` pointe vers `dash`, les privilèges Set-UID sont abandonnés avant d'exécuter votre commande.",
+          "hint_penalty": 0.5,
+          "order": 0
+        },
+        {
+          "title": "Comment construire argv[] sans l'écrire littéralement dans badfile ?",
+          "content": "Le `NULL` final (4 octets à zéro) stopperait `strcpy()` s'il était dans `badfile`. Construisez plutôt `argv[]` dans le buffer `input[]` du `main()`, dont l'adresse est déjà imprimée par le programme, en utilisant les octets déjà présents sur la pile avant l'appel à `bof()`.",
+          "hint_penalty": 0.5,
+          "order": 1
+        },
+        {
+          "title": "Quelle fonction utiliser pour prendre la main ?",
+          "content": "Faites pointer l'adresse de retour écrasée vers `execv()` plutôt que `system()`.",
+          "hint_penalty": 0.5,
+          "order": 2
+        }
+      ],
+      "incorrect_answer_limit": 20,
+      "attachments": [],
+      "max_score": 6,
+      "variant_answers": false,
+      "reference_solution": [],
+      "mitre_techniques": [],
+      "expected_commands": [],
+      "commands_required": false
+    },
+    {
+      "title": "Tâche 5 (BONUS, optionnelle) — Return-Oriented Programming",
+      "level_type": "TRAINING_LEVEL",
+      "order": 7,
+      "estimated_duration": 30,
+      "minimal_possible_solve_time": null,
+      "answer": "R2L-TASK5-b02e71-ROP-FOO10-OK",
+      "answer_variable_name": null,
+      "content": "**Tâche optionnelle, points bonus au-delà du 20/20.**\n\nFaites en sorte que `foo()` (présente mais jamais appelée dans `retlib.c`) soit invoquée **10 fois d'affilée** avant d'obtenir le shell root (via `execv(\"/bin/bash\", [\"/bin/bash\",\"-p\",NULL])` comme à la tâche 4).\n\nPrincipe : chaque retour de `foo()` doit pointer vers l'adresse de `foo()` elle-même (10 fois), puis le 10ᵉ retour pointe vers `execv()`.\n\n```\nFunction foo() is invoked 1 times\n...\nFunction foo() is invoked 10 times\nbash-5.0# \n```\n\nUne fois réussi : `cat /root/flag_task5.txt`.",
+      "solution": "On chaîne 10 fois l'adresse de `foo()` comme \"adresse de retour\" successive sur la pile (chaque `foo()` n'a pas de paramètre, donc pas d'espace de pile à gérer entre deux appels), puis on fait pointer le dernier retour vers `execv()` avec les mêmes arguments qu'à la Tâche 4.",
+      "solution_penalized": true,
+      "hints": [
+        {
+          "title": "Par quoi commencer ?",
+          "content": "Reprenez votre solution de la Tâche 4, et remplacez la première adresse de retour (celle qui pointait vers `execv()`) par 10 adresses consécutives de `foo()`.",
+          "hint_penalty": 0.5,
+          "order": 0
+        },
+        {
+          "title": "foo() a-t-elle besoin d'arguments sur la pile ?",
+          "content": "Non, `foo()` ne prend aucun paramètre : chaque \"retour\" ne consomme que 4 octets (l'adresse de retour), ce qui simplifie le chaînage par rapport à un ROP générique.",
+          "hint_penalty": 0.5,
+          "order": 1
+        }
+      ],
+      "incorrect_answer_limit": 20,
+      "attachments": [],
+      "max_score": 3,
+      "variant_answers": false,
+      "reference_solution": [],
+      "mitre_techniques": [],
+      "expected_commands": [],
+      "commands_required": false
+    },
+    {
+      "title": "Fin du TP",
+      "level_type": "INFO_LEVEL",
+      "order": 8,
+      "estimated_duration": 0,
+      "minimal_possible_solve_time": null,
+      "content": "Bravo, vous avez terminé le TP Return-to-libc.\n\nDéposez votre rapport (captures d'écran + explications, en particulier pour la Tâche 3 bis) selon les modalités indiquées par votre enseignant."
+    }
+  ]
+}

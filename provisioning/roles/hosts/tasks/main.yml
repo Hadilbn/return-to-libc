@@ -1,0 +1,11 @@
+---
+# Configuration de base commune à toutes les machines
+
+- name: Install net-tools
+  apt:
+    name: net-tools
+    update_cache: yes
+
+- name: Install unzip
+  apt:
+    name: unzip

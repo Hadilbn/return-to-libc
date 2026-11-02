@@ -1,0 +1,17 @@
+---
+- name: Configuration de base des hôtes
+  hosts: hosts
+  become: yes
+  roles:
+    - hosts
+
+- name: Configuration de la machine pwn (cible + attaquant, même hôte)
+  hosts: pwn
+  become: true
+  roles:
+    - role: user-access
+      user_access_username: student
+      user_access_password: Password123
+      user_access_sudo: True
+    - role: pwn
+    - role: chrony

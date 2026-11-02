@@ -1,0 +1,122 @@
+---
+# --- Paquets nécessaires au lab Return-to-libc (SEED Labs, 32 bits) ---
+- name: Install build & exploitation toolchain
+  apt:
+    name:
+      - build-essential
+      - gcc-multilib
+      - libc6-dev-i386
+      - gdb
+      - python3
+      - zsh
+      - git
+    state: present
+    update_cache: yes
+
+- name: Clone PEDA (gdb-peda) for a friendlier gdb prompt
+  git:
+    repo: https://github.com/longld/peda.git
+    dest: "/home/{{ lab_user }}/peda"
+  become_user: "{{ lab_user }}"
+
+- name: Enable PEDA in .gdbinit
+  lineinfile:
+    path: "/home/{{ lab_user }}/.gdbinit"
+    create: yes
+    owner: "{{ lab_user }}"
+    line: "source /home/{{ lab_user }}/peda/peda.py"
+
+# --- Déploiement des sources du lab ---
+- name: Create lab directory
+  file:
+    path: "{{ lab_dir }}"
+    state: directory
+    owner: "{{ lab_user }}"
+    mode: '0755'
+
+- name: Copy lab source files
+  copy:
+    src: "{{ item }}"
+    dest: "{{ lab_dir }}/{{ item }}"
+    owner: "{{ lab_user }}"
+    mode: '0644'
+  loop:
+    - retlib.c
+    - prtenv.c
+    - Makefile
+    - gdb_command.txt
+    - exploit_task3_skeleton.py
+    - exploit_task4_skeleton.py
+
+- name: Make exploit skeletons executable
+  file:
+    path: "{{ lab_dir }}/{{ item }}"
+    mode: '0744'
+  loop:
+    - exploit_task3_skeleton.py
+    - exploit_task4_skeleton.py
+
+# --- Compilation + configuration Set-UID root (section 2.3 du sujet) ---
+- name: Build retlib and prtenv
+  command: make all
+  args:
+    chdir: "{{ lab_dir }}"
+
+- name: Make retlib a root-owned Set-UID binary
+  file:
+    path: "{{ lab_dir }}/retlib"
+    owner: root
+    group: root
+    mode: '4755'
+
+- name: prtenv belongs to the student
+  file:
+    path: "{{ lab_dir }}/prtenv"
+    owner: "{{ lab_user }}"
+    mode: '0755'
+
+- name: badfile is writable by the student
+  file:
+    path: "{{ lab_dir }}/badfile"
+    owner: "{{ lab_user }}"
+    mode: '0644'
+
+# --- Désactivation des contre-mesures (section 2.2 du sujet) ---
+- name: Disable ASLR persistently
+  sysctl:
+    name: kernel.randomize_va_space
+    value: '0'
+    sysctl_set: yes
+    state: present
+    reload: yes
+
+- name: Link /bin/sh to zsh (dash drops Set-UID privilege, cf. 2.2)
+  file:
+    src: /bin/zsh
+    dest: /bin/sh
+    state: link
+    force: yes
+
+# --- Preuves de réussite (flags), lisibles uniquement par root ---
+- name: Deploy per-task flags (readable only once root shell is obtained)
+  copy:
+    content: "{{ item.content }}\n"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: '0400'
+  loop:
+    - { dest: /root/flag_task3.txt, content: "{{ flag_task3 }}" }
+    - { dest: /root/flag_task4.txt, content: "{{ flag_task4 }}" }
+    - { dest: /root/flag_task5.txt, content: "{{ flag_task5 }}" }
+
+- name: Note for the student about where exploits should be run
+  copy:
+    content: |
+      Dossier de travail : {{ lab_dir }}
+      Binaire cible (Set-UID root) : {{ lab_dir }}/retlib
+      Outil d'inspection d'adresse env : {{ lab_dir }}/prtenv
+      Squelettes d'exploit : exploit_task3_skeleton.py, exploit_task4_skeleton.py
+    dest: "{{ lab_dir }}/README_LAB.txt"
+    owner: "{{ lab_user }}"
+    mode: '0644'

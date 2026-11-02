@@ -1,0 +1,11 @@
+lab_user: student
+lab_dir: /home/student/lab
+
+# Contenu des fichiers "preuve de réussite" lus par l'étudiant une fois le
+# shell root obtenu. Ce sont ces chaines (pas les adresses mémoire, qui ne
+# sont pas prévisibles à l'avance) qui servent de FLAG dans training.json.
+# -> changez-les à chaque session si vous voulez éviter la réutilisation
+#    des flags d'une promotion à l'autre.
+flag_task3: "R2L-TASK3-5f3c9a-SYSTEM-SHELL-OK"
+flag_task4: "R2L-TASK4-91be2d-BASHP-ROOT-OK"
+flag_task5: "R2L-TASK5-b02e71-ROP-FOO10-OK"
