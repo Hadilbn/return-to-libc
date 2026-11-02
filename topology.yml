@@ -1,14 +1,16 @@
 name: return-to-libc-tp
 
-# Une seule machine suffit : l'attaque Return-to-libc est une escalade de
-# privilèges LOCALE sur un binaire Set-UID root. L'étudiant se connecte à
-# "pwn" en SSH/GUI, compile/exploite localement, pas besoin de cible distante.
 hosts:
   - name: pwn
     base_box:
-      # Image Ubuntu 20.04 x86_64 (le lab tourne en 32 bits via gcc -m32,
-      # donc l'image hôte peut rester en 64 bits, cf. section 2.1 du sujet)
       image: ubuntu-20.04-x86_64
+      mgmt_user: debian
+    flavor: standard.small
+
+routers:
+  - name: router
+    base_box:
+      image: debian-12-x86_64
       mgmt_user: debian
     flavor: standard.small
 
@@ -25,10 +27,9 @@ net_mappings:
     network: pwn-switch
     ip: 10.1.26.10
 
-groups: []
+router_mappings:
+  - router: router
+    network: pwn-switch
+    ip: 10.1.26.1
 
-# NOTE: si votre plateforme CyberRangeCZ exige un routeur même pour un seul
-# hôte (selon la version), dupliquez le bloc "routers" + "router_mappings"
-# du topology.yml d'origine (library-junior-hacker) en remplaçant le CIDR.
-# Testez un déploiement de sandbox une fois pour valider ce topology.yml
-# avant de le donner aux élèves.
+groups: []
