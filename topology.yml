@@ -3,8 +3,8 @@ name: return-to-libc-tp
 hosts:
   - name: pwn
     base_box:
-      image: ubuntu-20.04-x86_64
-      mgmt_user: debian
+      image: seed
+      mgmt_user: ubuntu
     flavor: standard.small
 
 routers:
